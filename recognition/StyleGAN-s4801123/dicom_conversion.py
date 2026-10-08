@@ -250,7 +250,7 @@ def convert_dicoms(
                 if not idx:
                     row["status"] = "skipped: no usable slices"
                 else:
-                    imgs = resample_to_canvas(vol[idx], row_sp, col_sp, target_spacing, fov_px, size)
+                    imgs = resample_to_canvas(vol[idx], row_sp, col_sp, target_spacing, fov_px, size) # type: ignore
                     out = dst / label
                     out.mkdir(exist_ok=True)
                     for i, img in zip(idx, imgs):
