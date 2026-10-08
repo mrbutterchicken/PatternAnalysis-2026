@@ -198,7 +198,7 @@ def convert_dicoms(
     size=256,
     target_spacing=1.0,        # mm per pixel after resampling
     fov_mm=256.0,              # fixed field of view -> consistent head scale
-    keep_range=(0.30, 0.75),   # fraction of head extent to keep (e.g. slices 60-150 of 200)
+    keep_range=(0.35, 0.65),   # fraction of head extent to keep (e.g. slices 60-150 of 200)
     min_foreground=0.05,       # also drop near-empty slices
     min_slices=60,             # ignore localizers / tiny series
     weighting_patterns=None,   # {"T1": regex, ...}; see DEFAULT_PATTERNS
