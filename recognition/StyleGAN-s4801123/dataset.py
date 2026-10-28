@@ -6,7 +6,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
+import numpy as np # numpy is used only in the dataset pre-processing :(
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
