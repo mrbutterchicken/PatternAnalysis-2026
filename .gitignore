@@ -1,7 +1,7 @@
 COMP3710_Report_2026_v2.1.pdf
 
 .DS_Store
-recognition/.DS_Store
-
 recognition/StyleGAN-s4801123/data
 recognition/StyleGAN-s4801123/models
+recognition/.DS_Store
+recognition/StyleGAN-s4801123/.DS_Store
