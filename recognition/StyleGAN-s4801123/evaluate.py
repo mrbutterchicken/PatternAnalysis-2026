@@ -5,17 +5,6 @@ visualisations where applicable (e.g., prediction overlays, generated samples,
 heatmaps). NumPy is allowed in this script for visualization or loading data.
 """
 
-import torch
-
-if torch.cuda.is_available():
-    device = torch.device("cuda")       # NVIDIA GPU
-elif torch.backends.mps.is_available():
-    device = torch.device("mps")        # Apple Silicon (M1/M2/M3/M4)
-else:
-    device = torch.device("cpu")        # Fallback Default
-
-print(f"Using device: {device}")
-
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -23,7 +12,7 @@ from dataset import *
 from modules import *
 
 # =============================================================================
-# PREDICT   needs the SETUP, DATASET and MODULES cells (TRAINING is not required in a fresh session)
+# PREDICT 
 # =============================================================================
 import torchvision
 from scipy import stats as sps
@@ -241,7 +230,7 @@ jump_ratio = float(max(jump))
 print(f"Interpolation smoothness (largest step / mean step, worst row): {jump_ratio:.2f}  (1 = perfectly even)")
 
 # ---- 3. PLAUSIBILITY PROXIES + VERDICT --------------------------------------------------------------
-# These are automatic stand-ins, NOT a clinical review. Thresholds are rules of thumb, not validated standards.
+# These are automatic stand-ins, not a clinical review. Thresholds are rules of thumb, not validated standards.
 def frechet(a, b):
     a, b = a.numpy().astype(np.float64), b.numpy().astype(np.float64)
     s1, s2 = np.cov(a, rowvar=False), np.cov(b, rowvar=False)
