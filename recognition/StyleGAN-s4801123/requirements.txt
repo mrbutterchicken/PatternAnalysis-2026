@@ -1,0 +1,29 @@
+# Requirements for the brain-MRI StyleGAN project:
+#   - dicom_data.py                       (DICOM -> PNG converter, runs on your own machine)
+#   - stylegan_sagittal_mri_jpeg.ipynb    (training + evaluation, runs on Google Colab)
+#
+# Python 3.10 or newer.
+# Install with:   pip install -r requirements.txt
+#
+# On Google Colab, torch, torchvision, numpy, scipy, matplotlib, pillow and tqdm are already installed, so
+# this file is effectively a no-op there. Do NOT pip-install "google-colab": it is part of the Colab runtime.
+# These are minimum versions (the oldest releases the code relies on). For an exact, reproducible lock, run
+# "pip freeze" after a successful run and keep that output instead.
+
+torch>=2.3           # numpy-2 support; torch.load(weights_only=...), torch.fft, TF32 flags, torch.logit
+torchvision>=0.18    # pairs with torch 2.3 (pip picks a matching pair); ResNet-18 weights, make_grid / save_image
+numpy>=1.24
+scipy>=1.10          # Frechet distance (sqrtm) and KS tests in the audits
+pillow>=10.0         # JPEG / PNG loading, ImageOps.exif_transpose
+matplotlib>=3.7
+tqdm>=4.65           # tqdm.auto in the notebook
+pydicom>=2.4         # only needed by dicom_data.py (the DICOM converter)
+
+# Optional: needed only if your DICOM files use compressed transfer syntaxes (pixel_array raises an error without them)
+# pylibjpeg
+# pylibjpeg-libjpeg
+# pylibjpeg-openjpeg
+# python-gdcm
+
+# Optional: only if you run the notebook locally instead of on Colab (and remove the google.colab import / drive.mount)
+# jupyterlab
