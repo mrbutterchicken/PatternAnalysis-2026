@@ -4,16 +4,16 @@ from modules import *
 from evaluate import *
 
 # =============================================================================
-# EVALUATION (segmentation)   needs SETUP, DATASET, MODULES and the first PREDICT cell (it loads G_ema and defines
-#                             generate() and project()).
+# EVALUATION (segmentation)   
 #
 # A segmenter is a MEASURING INSTRUMENT: it does not have to be perfect, it has to treat real and synthetic images
 # the same way. Dice needs two masks of the SAME anatomy, which an unconditional GAN's images do not have, so we use
-#   1. class-area statistics (how much CSF / grey / white matter)      2. segmenter confidence and stability
+#   1. class-area statistics (how much CSF / grey / white matter)      
+#   2. segmenter confidence and stability
 #   3. best-match Dice: is there a REAL mask resembling each synthetic mask as well as one resembles a new real scan?
 #   4. paired Dice: real scan vs the generator's reconstruction of it (via projection)
 # =============================================================================
-CLASS_NAMES = ["background", "CSF", "GM", "WM"]       # EDIT to match your segmenter's output channels
+CLASS_NAMES = ["background", "CSF", "GM", "WM"] 
 TISSUE = [1, 2, 3]                                    # labels that enter the Dice scores (background excluded)
 FG_THR = 0.08                                         # pixels brighter than this (0-1 scale) count as brain
 
