@@ -41,7 +41,7 @@ The files in the project folder `recognition/StyleGAN-s4801123` are structured i
 This project was completed on a single Google Colab notebook using an A100 GPU; however, it can be replicated in this format simply doing the following:
 1. Ensure you have access to a `cuda`-enabled GPU (else the `dataset.py` file will interrupt and exit). 
 2.  Change the `DATA_SOURCE`, `UNZIP_TO`, `OUT_DIR` and `RUN_DIR` constants in the `dataset.py` file to the appropriate directories on your local machine.
-3. Run `pip install -r requirements.txt` to ensure all the required libraries are installed and updated.
+3. Run `pip install -r requirements.txt` to ensure all the required libraries are installed and updated. You may comment out the relevant portions of `requirements.txt` if you do not intend to use the DICOM converter (i.e. if you're starting with processed PNGs or JPEGs). You may also do this in a python virtual environment if you really feel like it. 
 4. Run each file in sequence:
     1. `python dicom_conversion.py path/to/src path/to/dest/` (only if starting with DICOM files) 
     2. `python dataset.py` (assumes training data is split into `train/AD` and `train/NC` like it is on rangpur), 
@@ -50,8 +50,6 @@ This project was completed on a single Google Colab notebook using an A100 GPU; 
     5. `python evaluate.py`, and finally 
     6. `python evaluate-segmentation.py`.  
 The files in this repository were updated in line with the Colab script. 
-
-The requirements to run this project are outlined in `requirements.txt`. You may install these requirements with `pip install -r requirements.txt`. You may comment out the relevant portions of `requirements.txt` if you do not intend to use the DICOM converter (i.e. if you're starting with processed PNGs or JPEGs). 
 
 ## Algorithm
 
@@ -127,6 +125,47 @@ And here is one from the final epoch (30):
 It is clear that the VAE also sees significant improvement over training but generated images remain unsharp, with little detail and much looser reconstruction of anatomical details and overall structure. A proper side-by-side and quantitative comparison with the StyleGAN-2 is in the next section. 
 
 ### Evaluation Metrics
+
+Many methods were used to evaluate the performance of the StyleGAN-2, both with comparison against seen and unseen data. 
+
+#### Comparison Against Baseline
+
+| Metric | Real Images | VAE Baseline | StyleGAN-2 | 
+| - | - | - | - |
+| sharpness (Laplacian var.) | 1.000 | 0.018  | 0.874 |
+| high-frequency spectrum vs real (log10) | 0.000 | -2.167 | -0.026 |
+| diversity: mean pairwise feature distance | 12.942 | 14.132 | 12.431 |
+| diversity: per-pixel std across samples | 0.079 | 0.067 | 0.084 |
+| fidelity: precision (samples inside real manifold) | nan | 0.094 | 0.707 |
+| diversity: recall (real covered by samples) | nan | 0.003 | 0.480 |
+| fidelity: Frechet distance to held-out real | 5.704 | 25.109 | 11.845 |
+
+The StyleGAN-2 far outperforms the baseline model in every measured respect, including diversity, sharpness and fidelity measures. We can also see this by inspecting the generated images more closely.
+
+This is a grid of random samples from real, VAE and StyleGAN-2 generated images:
+
+<img src="evaluation_log/compare_samples.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="1000">
+
+This is a nearest-neighbours comparison, where real held-out images are compared to their closest generated image from the latent space of the VAE and the StyleGAN-2 respectively:
+
+<img src="evaluation_log/compare_nearest.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+And finally, to get a proper closer look at the details from either generator, here is a random sample of zoomed-in images:
+
+<img src="evaluation_log/compare_zoom.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+
+This, along with the quantitative measures of fidelity and sharpness, make it abundantly clear that the StyleGAN-2 is a significant and required improvement over the baseline. In terms of the original engineering dilemma, I think this is sufficient to demonstrate that the StyleGAN-2 is worth the increased compute resources over the baseline model in order to better address the research question requirements. However, it is necessary to now inspect and scrutinise the StyleGAN-2 outputs further to ensure the latent space is appropriately disentangled, diverse, and anatomically precise. 
+
+#### Nearest-Neighbours Audit
+
+#### Latent Space Interpolation
+
+#### Segmentation Masking
+
+##### Tissue Intensity
+
+##### Pre-trained OASIS Segmentation Mask
 
 ### Final Engineering Recommendation
 
