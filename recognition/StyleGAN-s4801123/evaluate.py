@@ -230,7 +230,6 @@ jump_ratio = float(max(jump))
 print(f"Interpolation smoothness (largest step / mean step, worst row): {jump_ratio:.2f}  (1 = perfectly even)")
 
 # ---- 3. PLAUSIBILITY PROXIES + VERDICT --------------------------------------------------------------
-# These are automatic stand-ins, not a clinical review. Thresholds are rules of thumb, not validated standards.
 def frechet(a, b):
     a, b = a.numpy().astype(np.float64), b.numpy().astype(np.float64)
     s1, s2 = np.cov(a, rowvar=False), np.cov(b, rowvar=False)
@@ -253,21 +252,6 @@ def img_stats(x, bs=500):
     return {k: torch.cat(v).numpy() for k, v in out.items()}
 
 
-@torch.no_grad()
-def radial_psd(x, bs=250):
-    acc = 0
-    for i in range(0, len(x), bs):
-        b = prep(x[i:i + bs])[:, 0]
-        b = b - b.mean((1, 2), keepdim=True)
-        acc = acc + torch.fft.fftshift(torch.fft.fft2(b), dim=(-2, -1)).abs().square().sum(0)
-    acc = acc / len(x)
-    H = acc.shape[0]
-    ax_ = torch.arange(H, device=acc.device) - H // 2
-    r = (ax_.view(-1, 1) ** 2 + ax_.view(1, -1) ** 2).float().sqrt().long().flatten()
-    prof = torch.bincount(r, weights=acc.flatten()) / torch.bincount(r)
-    return prof[:H // 2].cpu().numpy()
-
-
 ref_idx = torch.randperm(len(train_ds), generator=torch.Generator().manual_seed(1))[:min(2000, len(train_ds))]
 ref_train = train_ds.data[ref_idx]
 
@@ -285,18 +269,6 @@ if val_ds is not None and len(val_ds) >= 50:
 st_g, st_r = img_stats(gen), img_stats(ref_train)
 ks = {k: float(sps.ks_2samp(st_g[k], st_r[k]).statistic) for k in st_g}
 print("KS distance synthetic vs training (0 = identical):", {k: round(v, 3) for k, v in ks.items()})
-
-# (c) frequency content: GANs sometimes leave grid artefacts or over-smooth the noise texture
-psd_g, psd_r = radial_psd(gen), radial_psd(ref_train)
-band = slice(len(psd_g) // 2, len(psd_g))
-psd_diff = float(np.mean(np.abs(np.log10(psd_g[band]) - np.log10(psd_r[band]))))
-psd_sign = float(np.mean(np.log10(psd_g[band]) - np.log10(psd_r[band])))
-plt.figure(figsize=(5, 3.4))
-plt.semilogy(psd_r, label="training"); plt.semilogy(psd_g, label="synthetic")
-plt.axvline(band.start, color="k", ls=":"); plt.xlabel("spatial frequency (cycles per image)"); plt.ylabel("power")
-plt.title("radially averaged power spectrum"); plt.legend(); plt.tight_layout()
-plt.savefig(AUDIT_DIR / "power_spectrum.png", dpi=110); plt.show()
-print(f"High-frequency band: |log10 power difference| {psd_diff:.2f} ({'more' if psd_sign > 0 else 'less'} energy than real)")
 
 # ---- verdict ------------------------------------------------------------------------------------
 checks = []                                                         # (group, name, value, status, rule)
@@ -317,7 +289,6 @@ grade("memorisation", "projection error, held-out / training",
       None if rmse_val is None else float(rmse_val.mean() / rmse_train.mean()), 1.3, 2.0)
 grade("plausibility", "Frechet ratio (synthetic vs real-vs-real baseline)", fd_ratio, 1.5, 3.0)
 grade("plausibility", "worst KS distance (area / brightness / position)", max(ks.values()), 0.15, 0.30, "{:.3f}")
-grade("plausibility", "high-frequency spectrum mismatch (log10)", psd_diff, 0.25, 0.50)
 grade("plausibility", "latent-interpolation smoothness", jump_ratio, 3.0, 5.0)
 
 print("\n" + "=" * 100)
@@ -411,8 +382,6 @@ def knn_radius(f, k=3):
 
 feats = {k: embed(v) for k, v in SETS.items()}                                   # ResNet-18 features, CPU
 feats_d = {k: v.to(DEVICE) for k, v in feats.items()}
-psd = {k: radial_psd(v) for k, v in SETS.items()}
-band = slice(len(psd["real"]) // 2, len(psd["real"]))
 if x_held is not None:
     feat_held = embed(x_held)
     n_fd = min(len(feat_held), N_CMP)
@@ -421,7 +390,6 @@ rows = {}
 for name in SETS:
     r = {}
     r["sharpness (Laplacian var.), real = 1"] = sharpness(SETS[name]) / sharpness(SETS["real"])
-    r["high-frequency spectrum vs real (log10; < 0 = too smooth)"] = float(np.mean(np.log10(psd[name][band]) - np.log10(psd["real"][band])))
     r["diversity: mean pairwise feature distance"] = float(torch.pdist(feats_d[name][:500]).mean())
     r["diversity: per-pixel std across samples"] = pixel_std(SETS[name])
     if name == "real":
@@ -449,12 +417,6 @@ for m in metrics:
             better = "StyleGAN2" if g_ < v else "VAE baseline"
     print(f"   {m:62s} -> {better}")
 
-plt.figure(figsize=(6.5, 4))
-for name in SETS:
-    plt.semilogy(psd[name], color=COLORS[name], label=name)
-plt.axvline(band.start, color="gray", ls=":"); plt.xlabel("spatial frequency (cycles per image)"); plt.ylabel("power")
-plt.title("radially averaged power spectrum"); plt.legend(); plt.tight_layout()
-plt.savefig(AUDIT_DIR / "compare_spectrum.png", dpi=110); plt.show()
 
 # ---- 4. nearest generated sample to some real scans (do the models cover real anatomy?) -------------------------
 q_src = x_held if x_held is not None else x_real

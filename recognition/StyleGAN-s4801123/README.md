@@ -146,9 +146,11 @@ This is a grid of random samples from real, VAE and StyleGAN-2 generated images:
 
 <img src="evaluation_log/compare_samples.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="1000">
 
-This is a nearest-neighbours comparison, where real held-out images are compared to their closest generated image from the latent space of the VAE and the StyleGAN-2 respectively:
+This is a nearest-neighbours comparison, where synthetic images from particular points in the latent space for both the VAE and StyleGAN-2 are compared with their closest real held-out images:
 
 <img src="evaluation_log/compare_nearest.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+We immediately see a strong possibility that StyleGAN-2 images are "closer" to real images overall. 
 
 And finally, to get a proper closer look at the details from either generator, here is a random sample of zoomed-in images:
 
@@ -159,7 +161,21 @@ This, along with the quantitative measures of fidelity and sharpness, make it ab
 
 #### Nearest-Neighbours Audit
 
+For a thousand randomly sampled synthetic images, we perform a nearest-neighbours search for the closest training scan. The NN distance is calculated first in pixel space, the most rudimentary form, and then in ResNet-18 space. This is done by loading a pre-trained ResNet-18, removing its classification layer, and performing NN calculations based on the outputs of its final remaining layer (which only has 512 nodes, so this acts a bit like PCA). The idea there is that ResNet-18 distance will ignore things like small translations (which would greatly separate two otherwise identical images in pixel space) and focus on core attributes of the image. 
+
+We measured distance from the synthetic images to their nearest training images, then distances between distinct train images for a baseline idea of expected distance, and distances between test images and train images for a reasonable upper bound on the expected distances.
+
+<img src="evaluation_log/nn_distances.png" alt="Nearest Neighbours Audit" width="850">
+
+The graphs make it abundantly clear that synthetic images behave exactly as intended in terms of not memorising training data, but being reasonably close, just like the held-out test images. In ResNet-18 space we see an even stronger normal distribution overlap, which is expected once we remove the inaccuracies of measuring distance pixel-by-pixel. 
+
 #### Latent Space Interpolation
+
+Here we try to verify that the latent space is appropriately disentangled and that different directions in the latent space genuinely encode different attributes in a smooth way. We pick a random real image, use gradient descent to find the point in the latent space of the StyleGAN-2 which would correspond most closely to that image, then linearly interpolate this point to another (random) point in the latent space. We do this for training scans and test scans alike. 
+
+<img src="evaluation_log/interpolation.png" alt="Interpolation of latent space." width="850">
+
+Not only do all the interpolations look smooth and reasonable, there seems to be no noticeable difference in performance between train and test images, enforcing the conclusion that the model is able to produce genuinely novel but realistic images without overfitting. The smoothness of the interpolation also means it has been able to learn a smooth latent space where different directions control certain distinct attributes of the image in a smooth way. 
 
 #### Segmentation Masking
 
