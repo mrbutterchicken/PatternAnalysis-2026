@@ -25,19 +25,19 @@ We ran 15 epochs (out of a proposed 300) of training and took random samples fro
 
 **Epoch 5:**
 
-<img src="StyleGAN-s4801123/data/samples/epoch0005.png" alt="Project Diagram" width="350">
+<img src="StyleGAN-s4801123/data/old-training-samples/epoch0005.png" alt="Project Diagram" width="350">
 
 <br>
 
 **Epoch 10:**
 
-<img src="StyleGAN-s4801123/data/samples/epoch0010.png" alt="Project Diagram" width="350">
+<img src="StyleGAN-s4801123/data/old-training-samples/epoch0010.png" alt="Project Diagram" width="350">
 
 <br>
 
 **Epoch 15:**
 
-<img src="StyleGAN-s4801123/data/samples/epoch0015.png" alt="Project Diagram" width="350">
+<img src="StyleGAN-s4801123/data/old-training-samples/epoch0015.png" alt="Project Diagram" width="350">
 
 As we can see, there is significant progress in only 15 epochs, with anatomical structure being almost totally respected, and we are beginning to reproduce a lot of detail in the folds of the brain (although there is more work to do there). We also see significant standard deviation so model collapse does not seem to be a problem yet. 
 
