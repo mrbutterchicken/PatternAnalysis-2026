@@ -7,8 +7,9 @@ Your implementation of the model should not depend on NumPy (or other Python lib
 from dataset import *
 
 # =============================================================================
-# MODULES   compact StyleGAN2: mapping network -> style-modulated convs + noise -> skip-RGB generator,
-#           residual discriminator with minibatch-stddev layer, adaptive augmentation
+# MODULES   compact StyleGAN2: mapping network -> style-modulated convs + noise 
+#           -> skip-RGB generator, residual discriminator with 
+#           minibatch-stddev layer, adaptive augmentation
 # =============================================================================
 SQ2 = math.sqrt(2)
 
