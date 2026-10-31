@@ -350,3 +350,127 @@ with open(AUDIT_DIR / "audit.json", "w") as f:
     json.dump(dict(epoch=ck["epoch"], checks=checks, memorisation=m, plausibility=p_,
                    nn={k: {kk: vv for kk, vv in v.items() if not isinstance(vv, np.ndarray)} for k, v in NN.items()}), f, indent=1, default=float)
 print(f"\nFigures and audit.json saved in {AUDIT_DIR}")
+
+
+# =============================================================================
+# COMPARISON: VAE baseline vs StyleGAN2   (needs SETUP, DATASET, MODULES, ConvVAE (BASELINE cell 1), the first PREDICT cell,
+#                                          and both models trained)
+# Clarity: zoomed crops, Laplacian sharpness, spectrum.  Diversity: pairwise distances, pixel std, recall.
+# Fidelity: Frechet distance to held-out real scans, precision, nearest-real-neighbour panel.
+# Look at the images first: the numbers use crude ImageNet features and are only a guide.
+# =============================================================================
+N_CMP = 200 if QUICK_TEST else 1000
+ck_v = torch.load(VAE_DIR / "latest.pt", map_location=DEVICE, weights_only=False)
+vae = ConvVAE(ck_v["res"], ck_v["latent"]).to(DEVICE)
+vae.load_state_dict(ck_v["model"]); vae.eval()
+print(f"Loaded VAE (epoch {ck_v['epoch']}) and StyleGAN2 (epoch {ck['epoch']})")
+
+g_cmp = torch.Generator().manual_seed(11)
+x_real = train_ds.data[torch.randperm(len(train_ds), generator=g_cmp)[:N_CMP]]                 # real, training patients
+x_held = val_ds.data[torch.randperm(len(val_ds), generator=g_cmp)[:N_CMP]] if val_ds is not None else None
+SETS = {"real": x_real, "VAE baseline": vae.sample(N_CMP, seed=21), "StyleGAN2": generate(N_CMP, psi=1.0, seed=321)}
+COLORS = {"real": "k", "VAE baseline": "tab:orange", "StyleGAN2": "tab:blue"}
+
+# ---- 1. sample grids: look at these first --------------------------------------------------------------------
+fig, ax = plt.subplots(1, 3, figsize=(18, 6.5))
+for a, (name, x) in zip(ax, SETS.items()):
+    a.imshow(make_grid(prep(x[:32]).cpu(), nrow=8, padding=2).permute(1, 2, 0)); a.set_title(name, fontsize=14); a.axis("off")
+plt.tight_layout(); plt.savefig(AUDIT_DIR / "compare_samples.png", dpi=110); plt.show()
+
+# ---- 2. clarity: zoomed crops from the middle of the image ------------------------------------------------------
+s_ = RES // 3
+c0 = (RES - s_) // 2
+fig, ax = plt.subplots(3, 6, figsize=(15, 7.8))
+for r, (name, x) in enumerate(SETS.items()):
+    for c in range(6):
+        ax[r, c].imshow(prep(x[c:c + 1])[0, 0, c0:c0 + s_, c0:c0 + s_].cpu(), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+        ax[r, c].axis("off")
+    ax[r, 0].text(-0.05, 0.5, name, transform=ax[r, 0].transAxes, ha="right", va="center", fontsize=12)
+plt.tight_layout(); plt.savefig(AUDIT_DIR / "compare_zoom.png", dpi=110, bbox_inches="tight"); plt.show()
+
+# ---- 3. numbers --------------------------------------------------------------------------------------------------
+LAP = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float32, device=DEVICE).view(1, 1, 3, 3)
+
+
+@torch.no_grad()
+def sharpness(x, bs=250):
+    """Median Laplacian variance (higher = more fine detail / edges; noise also raises it)."""
+    return float(np.median(np.concatenate([F.conv2d(prep(x[i:i + bs]), LAP).var((1, 2, 3)).cpu().numpy() for i in range(0, len(x), bs)])))
+
+
+@torch.no_grad()
+def pixel_std(x, bs=250):
+    return float(torch.cat([prep(x[i:i + bs]) for i in range(0, len(x), bs)]).std(0).mean())
+
+
+def knn_radius(f, k=3):
+    d = torch.cdist(f, f)
+    d.fill_diagonal_(float("inf"))
+    return d.kthvalue(k, dim=1).values
+
+
+feats = {k: embed(v) for k, v in SETS.items()}                                   # ResNet-18 features, CPU
+feats_d = {k: v.to(DEVICE) for k, v in feats.items()}
+psd = {k: radial_psd(v) for k, v in SETS.items()}
+band = slice(len(psd["real"]) // 2, len(psd["real"]))
+if x_held is not None:
+    feat_held = embed(x_held)
+    n_fd = min(len(feat_held), N_CMP)
+
+rows = {}
+for name in SETS:
+    r = {}
+    r["sharpness (Laplacian var.), real = 1"] = sharpness(SETS[name]) / sharpness(SETS["real"])
+    r["high-frequency spectrum vs real (log10; < 0 = too smooth)"] = float(np.mean(np.log10(psd[name][band]) - np.log10(psd["real"][band])))
+    r["diversity: mean pairwise feature distance"] = float(torch.pdist(feats_d[name][:500]).mean())
+    r["diversity: per-pixel std across samples"] = pixel_std(SETS[name])
+    if name == "real":
+        r["fidelity: precision (samples inside real manifold)"] = r["diversity: recall (real covered by samples)"] = float("nan")
+    else:
+        d_fr = torch.cdist(feats_d[name], feats_d["real"])
+        r["fidelity: precision (samples inside real manifold)"] = float((d_fr <= knn_radius(feats_d["real"])[None, :]).any(1).float().mean())
+        r["diversity: recall (real covered by samples)"] = float((d_fr.T <= knn_radius(feats_d[name])[None, :]).any(1).float().mean())
+    if x_held is not None:      # Frechet distance to scans of patients the models never saw; "real" row = real-vs-real floor
+        r["fidelity: Frechet distance to held-out real (lower = better)"] = frechet(feats[name][:n_fd], feat_held[:n_fd])
+    rows[name] = r
+
+metrics = list(rows["real"].keys())
+print("\n" + f"{'':62s}" + "".join(f"{n:>14s}" for n in SETS))
+for m in metrics:
+    print(f"{m:62s}" + "".join(f"{rows[n][m]:14.3f}" for n in SETS))
+print("\nClosest to the real data on each metric (VAE baseline vs StyleGAN2):")
+for m in metrics:
+    v, g_ = rows["VAE baseline"][m], rows["StyleGAN2"][m]
+    if np.isnan(rows["real"][m]):
+        better = "StyleGAN2" if g_ > v else "VAE baseline"                         # precision / recall: higher is better
+    else:
+        better = "StyleGAN2" if abs(g_ - rows["real"][m]) < abs(v - rows["real"][m]) else "VAE baseline"
+        if "Frechet" in m:
+            better = "StyleGAN2" if g_ < v else "VAE baseline"
+    print(f"   {m:62s} -> {better}")
+
+plt.figure(figsize=(6.5, 4))
+for name in SETS:
+    plt.semilogy(psd[name], color=COLORS[name], label=name)
+plt.axvline(band.start, color="gray", ls=":"); plt.xlabel("spatial frequency (cycles per image)"); plt.ylabel("power")
+plt.title("radially averaged power spectrum"); plt.legend(); plt.tight_layout()
+plt.savefig(AUDIT_DIR / "compare_spectrum.png", dpi=110); plt.show()
+
+# ---- 4. nearest generated sample to some real scans (do the models cover real anatomy?) -------------------------
+q_src = x_held if x_held is not None else x_real
+q_idx = torch.randperm(len(q_src), generator=g_cmp)[:6]
+q_f = embed(q_src[q_idx]).to(DEVICE)
+fig, ax = plt.subplots(3, 6, figsize=(15, 7.8))
+for c in range(6):
+    ax[0, c].imshow(prep(q_src[q_idx[c]:q_idx[c] + 1])[0, 0].cpu(), cmap="gray", vmin=0, vmax=1)
+    for r, name in ((1, "VAE baseline"), (2, "StyleGAN2")):
+        d = torch.cdist(q_f[c:c + 1], feats_d[name])[0]
+        j = int(d.argmin())
+        ax[r, c].imshow(prep(SETS[name][j:j + 1])[0, 0].cpu(), cmap="gray", vmin=0, vmax=1)
+        ax[r, c].set_title(f"feature dist {d[j]:.1f}", fontsize=8)
+    for r in range(3):
+        ax[r, c].axis("off")
+for r, t in enumerate([("held-out real" if x_held is not None else "real"), "nearest VAE sample", "nearest StyleGAN2 sample"]):
+    ax[r, 0].text(-0.05, 0.5, t, transform=ax[r, 0].transAxes, ha="right", va="center", fontsize=11)
+plt.tight_layout(); plt.savefig(AUDIT_DIR / "compare_nearest.png", dpi=110, bbox_inches="tight"); plt.show()
+print(f"Figures saved in {AUDIT_DIR}")

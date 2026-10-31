@@ -184,3 +184,73 @@ except KeyboardInterrupt:
 plot_log(log, RUN_DIR / "curves.png")
 with torch.no_grad():
     show(G_ema(fixed_z, noise_mode="zero"), nrow=8, title=f"EMA generator, fixed latents (epoch {epoch + 1})")
+
+# ---- VAE training: same images, same held-out set, checkpoint every SAVE_EVERY epochs --------------------
+VAE_LATENT = 256
+VAE_EPOCHS = 30            # ~330 iterations per epoch at batch 64 for 21k images; a few minutes on an A100
+VAE_BATCH  = 64
+VAE_LR     = 5e-4
+VAE_BETA   = 1e-4          # weight of the KL term vs the per-pixel MSE. Larger = smoother, blurrier samples that follow the prior
+VAE_WARMUP = 5             # epochs over which the KL weight ramps up from 0 (stops the latent collapsing early)
+
+vae = ConvVAE(RES, VAE_LATENT).to(DEVICE)
+opt_vae = torch.optim.Adam(vae.parameters(), lr=VAE_LR)
+print(f"VAE: {sum(p.numel() for p in vae.parameters()) / 1e6:.1f}M parameters")
+
+vae_log, vae_start = [], 0
+if RESUME and not QUICK_TEST and (VAE_DIR / "latest.pt").exists():
+    ck_v = torch.load(VAE_DIR / "latest.pt", map_location=DEVICE, weights_only=False)
+    vae.load_state_dict(ck_v["model"]); opt_vae.load_state_dict(ck_v["opt"])
+    vae_start, vae_log = ck_v["epoch"], ck_v["log"]
+    print(f"Resumed the VAE from epoch {vae_start}")
+
+n_epochs_v = 2 if QUICK_TEST else VAE_EPOCHS
+iters_v = 20 if QUICK_TEST else max(1, len(train_ds) // VAE_BATCH)
+save_every_v = 1 if QUICK_TEST else SAVE_EVERY
+loader_v = batches(train_ds, VAE_BATCH)
+_ref_ds = val_ds if val_ds is not None else train_ds
+val_x = _ref_ds.data[torch.randperm(len(_ref_ds), generator=torch.Generator().manual_seed(3))[:1000]]   # held-out slices for the reconstruction check
+
+
+@torch.no_grad()
+def vae_recon_mse(x_u8, bs=250):
+    """Mean squared reconstruction error (images in [-1,1]) using the encoder mean, no sampling."""
+    vae.eval()
+    err = [(vae.decode(vae.encode(b.to(DEVICE).float() / 127.5 - 1)[0]) - (b.to(DEVICE).float() / 127.5 - 1)).square().mean().item() * len(b)
+           for b in x_u8.split(bs)]
+    vae.train()
+    return sum(err) / len(x_u8)
+
+
+vae.train()
+fixed_zv = torch.randn(32, VAE_LATENT, generator=torch.Generator().manual_seed(7)).to(DEVICE)
+for epoch_v in range(vae_start, n_epochs_v):
+    beta = VAE_BETA * min(1.0, (epoch_v + 1) / VAE_WARMUP)
+    rec_sum = kl_sum = 0.0
+    for _ in range(iters_v):
+        x = next(loader_v)
+        x_hat, mu, lv = vae(x)
+        rec = F.mse_loss(x_hat, x, reduction="none").mean([1, 2, 3])                 # per-image mean squared error
+        kl = -0.5 * (1 + lv - mu.square() - lv.exp()).sum(1)                         # per-image KL to N(0, I), in nats
+        loss = (rec + beta * kl).mean()
+        opt_vae.zero_grad(set_to_none=True); loss.backward(); opt_vae.step()
+        rec_sum, kl_sum = rec_sum + rec.mean().detach(), kl_sum + kl.mean().detach()
+    row = dict(epoch=epoch_v + 1, beta=beta, rec=float(rec_sum) / iters_v, kl=float(kl_sum) / iters_v, held_out_mse=vae_recon_mse(val_x))
+    vae_log.append(row)
+    print(f"VAE epoch {row['epoch']:3d}/{n_epochs_v} | train MSE {row['rec']:.4f} | KL {row['kl']:.1f} nats | "
+          f"held-out reconstruction MSE {row['held_out_mse']:.4f} | beta {beta:.1e}")
+    if (epoch_v + 1) % save_every_v == 0 or epoch_v + 1 == n_epochs_v:
+        tmp = VAE_DIR / "latest.tmp"
+        torch.save(dict(model=vae.state_dict(), opt=opt_vae.state_dict(), epoch=epoch_v + 1, log=vae_log, res=RES, latent=VAE_LATENT), tmp)
+        os.replace(tmp, VAE_DIR / "latest.pt")
+        vae.eval()
+        with torch.no_grad():
+            save_image((vae.decode(fixed_zv).clamp(-1, 1) + 1) / 2, VAE_DIR / "samples" / f"epoch{epoch_v + 1:04d}.png", nrow=8)
+        vae.train()
+        print(f"-- saved VAE checkpoint and samples at epoch {epoch_v + 1} --")
+
+vae.eval()
+show(vae.sample(32, seed=1), nrow=8, title="VAE samples (random latent vectors)")
+with torch.no_grad():
+    rec_demo = vae.decode(vae.encode(val_x[:8].to(DEVICE).float() / 127.5 - 1)[0]).cpu()
+show(torch.cat([val_x[:8].float() / 127.5 - 1, rec_demo]), nrow=8, title="Held-out real slices (top) and their VAE reconstructions (bottom)")

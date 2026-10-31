@@ -194,6 +194,54 @@ class Discriminator(nn.Module):
         x = self.conv(self.mbstd(self.blocks(self.from_img(img))))
         return self.out(self.fc(x.flatten(1))).squeeze(1)
 
+# =============================================================================
+# BASELINE (VAE)   a convolutional variational autoencoder trained on the same images
+#
+# A plain autoencoder cannot generate new images: its latent space has no distribution to sample from. A VAE adds a
+# KL penalty that pulls the latent codes toward N(0, I), so decoding random N(0, I) vectors gives new images.
+# It is the standard "basic" generative baseline, and its characteristic weakness (blurry samples) is exactly what
+# the comparison with StyleGAN2 is meant to show.
+# =============================================================================
+class ConvVAE(nn.Module):
+    def __init__(self, res, latent=256):
+        super().__init__()
+        n = int(math.log2(res)) - 2                                    # halve the resolution down to 4x4
+        chs = [min(32 * 2 ** i, 256) for i in range(n)]                # e.g. 32, 64, 128, 256, 256, 256 for 256 px
+        enc, c = [], 1
+        for o in chs:
+            enc += [nn.Conv2d(c, o, 4, 2, 1), nn.GroupNorm(8, o), nn.SiLU()]
+            c = o
+        self.enc, self.c_last, self.latent, self.res = nn.Sequential(*enc), c, latent, res
+        self.mu, self.logvar = nn.Linear(c * 16, latent), nn.Linear(c * 16, latent)
+        self.fc = nn.Linear(latent, c * 16)
+        dec = []
+        for o in list(reversed(chs))[1:] + [chs[0]]:                   # n up-sampling blocks: 4x4 -> res x res
+            dec += [nn.ConvTranspose2d(c, o, 4, 2, 1), nn.GroupNorm(8, o), nn.SiLU()]
+            c = o
+        self.dec = nn.Sequential(*dec, nn.Conv2d(c, 1, 3, padding=1), nn.Tanh())
+
+    def encode(self, x):
+        h = self.enc(x).flatten(1)
+        return self.mu(h), self.logvar(h).clamp(-10, 10)
+
+    def decode(self, z):
+        return self.dec(self.fc(z).view(-1, self.c_last, 4, 4))
+
+    def forward(self, x):
+        mu, lv = self.encode(x)
+        return self.decode(mu + torch.randn_like(mu) * (0.5 * lv).exp()), mu, lv
+
+    @torch.no_grad()
+    def sample(self, n, seed=0, bs=250):
+        """n new images in [-1,1] (CPU) from random N(0, I) latent vectors."""
+        g = torch.Generator().manual_seed(seed)
+        out = [self.decode(torch.randn(min(bs, n - i), self.latent, generator=g).to(DEVICE)).cpu() for i in range(0, n, bs)]
+        return torch.cat(out)
+
+
+VAE_DIR = RUN_DIR / "vae"
+(VAE_DIR / "samples").mkdir(parents=True, exist_ok=True)
+
 
 def augment(x, p):
     """Differentiable augmentation, each image augmented with probability p (adaptive, see TRAINING).
