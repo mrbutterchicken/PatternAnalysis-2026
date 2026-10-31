@@ -40,14 +40,3 @@ We ran 15 epochs (out of a proposed 300) of training and took random samples fro
 <img src="StyleGAN-s4801123/data/old-training-samples/epoch0015.png" alt="Project Diagram" width="350">
 
 As we can see, there is significant progress in only 15 epochs, with anatomical structure being almost totally respected, and we are beginning to reproduce a lot of detail in the folds of the brain (although there is more work to do there). We also see significant standard deviation so model collapse does not seem to be a problem yet. 
-
-### Risks, Budget & Fallback
-
-1. 
-    + *Risk:* model training goes over compute budget
-    + *Mitigation:* ...buy more compute units lowkey
-2. 
-    + *Risk:* GAN sucks. 
-    + *Mitigation:* ... find out why it sucks and report on it??
-
-If GAN convergence is truly difficult, we can revert to a VAE, which worked super well in Demo 2 so should work well again. On that note, the GAN behaved really nicely in Demo 2 as well so lowkey I don't see why it should misbehave here. It already seems to behave pretty nicely. 
