@@ -136,9 +136,17 @@ Many methods were used to evaluate the performance of the StyleGAN-2, both with 
 | high-frequency spectrum vs real (log10) | 0.000 | -2.167 | -0.026 |
 | diversity: mean pairwise feature distance | 12.942 | 14.132 | 12.431 |
 | diversity: per-pixel std across samples | 0.079 | 0.067 | 0.084 |
-| fidelity: precision (samples inside real manifold) | nan | 0.094 | 0.707 |
-| diversity: recall (real covered by samples) | nan | 0.003 | 0.480 |
-| fidelity: Frechet distance to held-out real | 5.704 | 25.109 | 11.845 |
+| fidelity: precision | nan | 0.094 | 0.707 |
+| diversity: recall | nan | 0.003 | 0.480 |
+| fidelity: Frechet distance | 5.704 | 125.109 | 11.845 |
+
+Some explanations for the perhaps more obscure columns (i.e. lowkey all of them):
+- *High frequency spectrum vs real* tests clarity again, where 0 is as sharp as the real images, and more negative means more smooth, and less clear. 
+- *Mean pairwise feature distance* tests how "spread-out" 500 different random samples are, in ResNet-18 space (explained [below](#nearest-neighbours-audit)). 
+- *Per-pixel standard deviation* measures how intensity of pixels varies between images, on a scale of 0-1. This, adn the row above it, test for overfitting to & memorisation of training data. 
+- *Precision* measures what percentage of synthetic images land (in latent space) in a region covered by real images. Roughly, this measures the percentage of synthetic images that will probably look realistic, assuming a sufficiently smooth latent space. 
+- *Recall* measures which percentage of images "near" (in latent space) a particular synthetic sample are actually real images, as opposed to other synthetic ones. This is another test of realism. 
+- Frechet distance measures distance (in ResNet-18 space) of synthetic images to unseen test images. 
 
 The StyleGAN-2 far outperforms the baseline model in every measured respect, including diversity, sharpness and fidelity measures. We can also see this by inspecting the generated images more closely.
 
