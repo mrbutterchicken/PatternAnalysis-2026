@@ -105,10 +105,10 @@ Training curves are presented with an $x$-axis of "images shown to the Discrimin
 
 <br>
 
-- **Losses:**
-- **Discriminator Logits:**
-- **Mini-batch variance:**
-- **Adaptive Augmentation:**
+- **Losses:** As expected, the Generator initially has a really high loss because, well, it has no idea what it's doing at the start. Over time, we actually see a very clean and level convergence of the Generator and Discriminator losses, usually a sign that training further will not result in drastically new results. 
+- **Discriminator Logits:** Obviously the Discriminator starts off with a really easy job of telling real scans apart from early garbage from the Generator, so its logits have high magnitude, demonstrating high confidence. Toward the second half of training, we see the logits slowly creeping back up, which indicates that the Discriminator is getting more confident with separating real from fake. This can be both good and bad for training (more in the adaptive augmentation part). 
+- **Mini-batch variance:** This graph is supposed to show that synthetic images have about as much variance as real ones do, to prove that model collapse has been prevented. The graph, however, is not very informative because early generations had such high variance (producing nonsense garbage) that later runs seem to have zero variance. Howver, the real images have a similarly low variance, and actually inspecting the training [logs](training_log/log.csv) we can see that `std_ratio` stays very close to 1 after early epochs. 
+- **Adaptive Augmentation:** A potential issue with GANs in general is that the Discriminator, instead of the Generator, will memorise the training scans, and simply reject anything that is not one of those scans, pixel for pixel, and get 100% accuracy. To alleviate this, we "augment" the data fed to the Discriminator by shifting the intensity of pixels by a small amount. If Discriminator loss decreases, or its confidence increases, disproportionately, we increase the intensity of augmentation, and if otherwise, we decrease it. The target augmentation value of 0.6 is a hyperparameter that I chose not to optimise because I don't casually have 64554789 hours to spend waiting for 238901 different training loops to complete. Here, `r_t` is effectively a measure of how accurately the Discriminator classified the real images, and this informs the decision of `aug_p`. As you can see, toward the end as the Discriminator started becoming more confident, we started to increase `aug_p` to combat its potential overfitting. 
 
 For comparison purposes, I also included a baseline generator, which was a Variational Autoencoder trained over 30 epochs. A variational autoencoder is an improvement over the traditional autoencoder in that it samples from a distribution over its latent space, instead of sampling deterministically.  The VAE took about 6 minutes to train on an A100 using about 12.4GB of GPU RAM. By contrast, the StyleGAN-2 trained in approximately 7 hours using 28.4 GB of GPU RAM. 
 
@@ -179,22 +179,66 @@ Not only do all the interpolations look smooth and reasonable, there seems to be
 
 #### Segmentation Masking
 
+The last, and arguably most important part of evaluating this kind of image generation, is finding a way to ensure that anatomical structure is preserved. This approach was presented to me by a tutor during my feasibility review. 
+
+The idea is to use a pre-trained segmentation mask, which takes in an MRI slice and segments the scan into areas of white matter, grey matter, cerebro-spinal fluid, background, and perhaps other areas (depending on the segmentation mask itself) - and run it on both real train/test images and synthetic images. After this, we compute the Dice-Sorensen coefficient between masks to evaluate how similar they are. If synthetic scans do preserve anatomical structure, the key areas identified by the segmenter should be in the same spots, and the DSC should be high. 
+
+The main problem here, however, came from searching for suitable segmenters. Of course, I was unable to train my own without existing segmentation masks associated with the ADNI training images, which, if they exist, I do not have access to. Some segmenters exist online; however, they were unable to properly segment training images, some because they were designed for 3D DICOM MRI files, and others because they were designed for axial scans instead. Unfortunately, I could not find an online segmenter trained on exactly the kind of sagittal brain segments in my training data.  
+
 ##### Tissue Intensity
+
+This is not an actual segmenter, rather, a classifier based on the intensity (brightness) of the tissue pixel in the scan. Unsurprisingly, the "segmentations" still look pretty legitimate although it must always be kept in mind that they are not actual segmentations: two areas can have the same brightness but represent two completely different anatomical components of the brain. I include this in the results as a baseline before introducing the other attempted segmenter. 
+
+<img src="evaluation_log/paired_dice_intensity.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+<img src="evaluation_log/segmentation_stats_intensity.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+Ideally we hope for a Dice score above 0.9. Especially in the last held-out scan, we can see that the StyleGAN still fails to reproduce some of the finer details. However, the histograms show that this "segmenter" treats synthetic images almost exactly like real ones, with the distribution of CSF/GM/WM presence in the scans being almost identical for synthetic and real images. "Shift-stability" refers to how invariant the segmentation is under small changes: we measure the DSC between both the segmentation of the original image, and the segmentation of a small translation of that image (re-translated back so the two masks overlap). 
 
 ##### Pre-trained OASIS Segmentation Mask
 
+The most successful actual segmenter on this dataset was actually my OASIS axial scan UNET segmentation mask from COMP3710 Demo 2. However, this was trained on axial scans, not sagittal, so it was far, far from perfect, or even feasible as a segmenter on sagittal. So you can imagine how bad the others must have been for this one to be the best I could come up with. 
+
+<img src="evaluation_log/paired_dice_unet.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+<img src="evaluation_log/segmentation_stats_unet.png" alt="Real vs VAE vs StyleGAN-2 sample comparison" width="850">
+
+The histograms still show that synethic images are treated similarly to real ones, although the shift-stability plot reveals that this mask is much less stable under small variations - which makes sense given how different this data is to what it was trained on. As you can see, the DSC scores are quite poor, but it is also evident that this is a problem with the segmenter, not with the synthetic images themselves, because even on real images it is unable to provide a consistent or accurate segmentation, with the most obvious fault being that a lot of things that are clearly not the background are being mistaken for the background.  
+
 ### Final Engineering Recommendation
+
+We have conducted extensive testing on the trained StyleGAN-2 model and concluded that it has *not* memorised training scans, so patient-confidentiality will not be violated. Through latent space interpolation we have also concluded that the latent space is likely well disentangled with dimensions clearly (and in fact smoothly) corresponding to specific attributes of the scans. This means that in theory, one can produce images with higher prominence of a certain attribute, while still being clinically plausible, if desired. 
+
+We have also determined that the StyleGAN-2 is a significant improvement over baseline models like a VAE, making it potentially worth the added training resources, although this is up to the discretion of whoever wants to pay for the GPUs. In the grand scheme of things, 7 hours of training is not a long time especially when it only needs to be done once. It cost me barely $10 on Google Colab Pro to run this entire project with plenty of GPU RAM and compute units to spare, so I'm sure an engineering team can afford it. 
+
+However, anatomical faithfulness, which is the most important factor in determining whether a scan is truly viable, could not be verified. The only foreseeable amendment to this is to train a segmentation mask specifically on the ADNI data and then re-run the same evaluations to inspect the Dice coefficients. Because of the potentially drastic negative impact of a synthetic but anatomically inaccurate scan being used in open research, my recommendation is that the team **do not** use the StyleGAN-2 as trained until a segmentation mask is also trained and used in evaluation as I have outlined. 
 
 ## Acknowledgements & References
 
-https://medium.com/@arijzouaoui/stylegan-explained-3297b4bb813a
+Information on GAN, StyleGAN and StyleGAN-2 architecture:
 
-https://blog.paperspace.com/understanding-stylegan2/
+- COMP3710 lecture slides. 
 
-https://arxiv.org/abs/1812.04948
+- https://medium.com/@arijzouaoui/stylegan-explained-3297b4bb813a
 
-https://arxiv.org/abs/1703.06868
+- https://blog.paperspace.com/understanding-stylegan2/
 
-https://arxiv.org/pdf/1912.04958
+- https://arxiv.org/abs/1812.04948
+
+- https://arxiv.org/abs/1703.06868
+
+- https://arxiv.org/pdf/1912.04958
+
+Information on the Dice-Sorensen Coefficient:
+ 
+- https://en.wikipedia.org/wiki/Dice-Sørensen_coefficient
+
+Other segmentation mask options that I looked at:
+
+- https://pypi.org/project/DARTSeg/
+- https://huggingface.co/kiselyovd/brain-mri-segmentation 
+- https://github.com/nanand2/deeplab_mri_seg
 
 ## Artificial Intelligence Usage Disclosure
+
+Large Language Models (Claude Sonnet 5.5) were used to generate almost all parts of the code used in this project. I personally verified the architecture of the models and the output plots were as I intended. I ensured that any generated code came with `QUICKTEST` options so I could quickly verify that it works the way I intended before running a large operation like a full training loop. I also ensured model checkpoints were saved every 5 epochs to not lose progress.  
